@@ -3,39 +3,86 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local IP Detector</title>
+    <title>Auto P2P Device Info Exchange</title>
 </head>
 <body>
-    <h1>Local IP Detector</h1>
-    <p>Your detected IPs:</p>
-    <ul id="ip-list"></ul>
+    <h1>Auto P2P WebRTC</h1>
+    <h2>Device Info:</h2>
+    <pre id="device-info"></pre>
+    <h2>Messages:</h2>
+    <ul id="messages"></ul>
 
     <script>
-        async function getLocalIPs() {
-            return new Promise((resolve) => {
-                let ips = [];
-                const pc = new RTCPeerConnection({ iceServers: [] });
+        let pc = new RTCPeerConnection();
+        let dataChannel;
+        let isHost = Math.random() > 0.5; // Randomly pick a host and a client
+        let signalStorageKey = "webrtc-signal"; // Shared key for signaling
 
-                pc.createDataChannel("");
-                pc.createOffer().then(offer => pc.setLocalDescription(offer));
-
-                pc.onicecandidate = (event) => {
-                    if (!event.candidate) {
-                        pc.close();
-                        return resolve(ips);
-                    }
-                    const parts = event.candidate.candidate.split(" ");
-                    const candidateIP = parts[4];
-                    if (!ips.includes(candidateIP)) {
-                        ips.push(candidateIP);
-                        document.getElementById("ip-list").innerHTML += `<li>${candidateIP}</li>`;
-                    }
-                };
-            });
+        function getDeviceInfo() {
+            return {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                timestamp: new Date().toISOString()
+            };
         }
 
-        // Run the detection
-        getLocalIPs();
+        function logMessage(msg) {
+            document.getElementById("messages").innerHTML += `<li>${msg}</li>`;
+        }
+
+        function sendMessage(msg) {
+            if (dataChannel && dataChannel.readyState === "open") {
+                dataChannel.send(msg);
+                logMessage("You: " + msg);
+            }
+        }
+
+        function setupDataChannel(channel) {
+            dataChannel = channel;
+            dataChannel.onopen = () => {
+                console.log("Connected!");
+                sendMessage(JSON.stringify({ type: "device-info", data: getDeviceInfo() }));
+            };
+            dataChannel.onmessage = (event) => {
+                let receivedData = JSON.parse(event.data);
+                if (receivedData.type === "device-info") {
+                    document.getElementById("device-info").textContent = JSON.stringify(receivedData.data, null, 2);
+                } else {
+                    logMessage("Peer: " + event.data);
+                }
+            };
+        }
+
+        async function startConnection() {
+            if (isHost) {
+                dataChannel = pc.createDataChannel("device-info");
+                setupDataChannel(dataChannel);
+                let offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                localStorage.setItem(signalStorageKey, JSON.stringify({ offer }));
+            } else {
+                pc.ondatachannel = (event) => setupDataChannel(event.channel);
+            }
+        }
+
+        async function checkForSignal() {
+            let storedData = JSON.parse(localStorage.getItem(signalStorageKey));
+            if (!storedData) return;
+            if (storedData.offer && !isHost) {
+                await pc.setRemoteDescription(new RTCSessionDescription(storedData.offer));
+                let answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                localStorage.setItem(signalStorageKey, JSON.stringify({ answer }));
+            } else if (storedData.answer && isHost) {
+                await pc.setRemoteDescription(new RTCSessionDescription(storedData.answer));
+            }
+        }
+
+        // Periodically check for updates in localStorage (simulating a signaling server)
+        setInterval(checkForSignal, 1000);
+
+        // Start WebRTC automatically
+        startConnection();
     </script>
 </body>
 </html>
