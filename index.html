@@ -7,9 +7,9 @@
 <body>
 <h2>Automatic P2P Demo</h2>
 <p>
-  This page uses the free PeerJS Cloud Server for signaling.<br>
-  <strong>Phone (host):</strong> Will create a PeerJS “hotspot-host” ID.<br>
-  <strong>Client device:</strong> Will create a random PeerJS ID and automatically connect to “hotspot-host.”
+  This page uses a free public PeerJS cloud server at <code>0.peerjs.com</code> for signaling.<br>
+  <strong>Phone (host):</strong> Will create a PeerJS ID "hotspot-host".<br>
+  <strong>Client device:</strong> Will create a random PeerJS ID and automatically connect to "hotspot-host".<br>
 </p>
 
 <div style="border:1px solid #ccc; padding:1rem; margin:1rem 0;">
@@ -37,8 +37,9 @@
  * - If on a phone (host), create Peer with ID "hotspot-host".
  * - If on a laptop/tablet (client), create Peer with no ID (random)
  *   and automatically connect to "hotspot-host".
- * - Exchange messages with a WebRTC DataConnection, no user input needed.
- * - All you need is to host this file on a static site (e.g. GitHub Pages).
+ * - Exchange messages with a WebRTC DataConnection (p2p).
+ * - Host on a static site (e.g. GitHub Pages) with no custom server.
+ * - Use the free PeerJS cloud at 0.peerjs.com to handle signaling.
  */
 
 const HOST_ID = "hotspot-host";
@@ -49,20 +50,21 @@ const sendBtn = document.getElementById("sendBtn");
 
 /** 
  * Simple heuristic: if userAgent includes "Mobile", assume it's the phone (host).
- * This is not perfect, but it demonstrates the idea.
+ * Not bulletproof, but enough for a demo.
  */
 const isPhoneHost = /Mobile|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 /**
- * Create a PeerJS instance pointing to the free PeerJS Cloud Server.
- * (No API key needed since they allow keyless usage at time of writing.)
+ * Create a PeerJS instance pointing to the free cloud server at 0.peerjs.com.
+ * No key required for basic demos. 
  */
 let peer = new Peer(
-  isPhoneHost ? HOST_ID : undefined,  // phone = "hotspot-host", client = random ID
+  isPhoneHost ? HOST_ID : undefined,  // If phone, fix an ID; if not, random
   {
-    host: "peerjs.com",
+    host: "0.peerjs.com",
     secure: true,
     port: 443,
+    path: "/",
     config: {
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" }
@@ -77,9 +79,13 @@ let dataConn = null;
 peer.on("open", (id) => {
   console.log("My peer ID:", id);
   if (isPhoneHost) {
-    statusEl.innerHTML = "Phone is host with ID: " + id + "<br>Waiting for client to connect...";
+    statusEl.innerHTML = 
+      "Phone is host with ID: <strong>" + id + "</strong><br>" +
+      "Waiting for client to connect...";
   } else {
-    statusEl.innerHTML = "Client device (random ID: " + id + ")<br>Connecting to host...";
+    statusEl.innerHTML = 
+      "Client device (random ID: <strong>" + id + "</strong>)<br>" +
+      "Connecting to host...";
     // Auto-connect to phone host
     dataConn = peer.connect(HOST_ID);
     setupDataConnHandlers(dataConn);
