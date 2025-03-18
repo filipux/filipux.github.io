@@ -2,30 +2,29 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Automatic WebRTC Demo (Phone Hotspot & Client)</title>
+  <title>Auto P2P Demo - Show Local Stats</title>
 </head>
 <body>
-<h2>Automatic P2P Demo</h2>
+<h2>Automatic P2P (Phone Host & Client) + Stats</h2>
 <p>
-  This page uses a free public PeerJS cloud server at <code>0.peerjs.com</code> for signaling.<br>
-  <strong>Phone (host):</strong> Will create a PeerJS ID "hotspot-host".<br>
-  <strong>Client device:</strong> Will create a random PeerJS ID and automatically connect to "hotspot-host".<br>
+  <strong>Phone (host):</strong> “hotspot-host” ID.<br>
+  <strong>Client (hotspot user):</strong> random ID, auto-connect to “hotspot-host,” auto-send device info.<br>
+  We’ll show the WebRTC “ICE candidate pair” details to prove local/hotspot usage.
 </p>
 
 <div style="border:1px solid #ccc; padding:1rem; margin:1rem 0;">
   <h3>Connection Status</h3>
-  <div id="status">Loading...</div>
+  <div id="status">Initializing...</div>
 </div>
 
 <div style="border:1px solid #ccc; padding:1rem; margin:1rem 0;">
-  <h3>Send a Message</h3>
-  <input type="text" id="msgInput" placeholder="Type something..." />
-  <button id="sendBtn">Send</button>
+  <h3>Client Device Info</h3>
+  <div id="deviceInfo" style="min-height:40px;"></div>
 </div>
 
 <div style="border:1px solid #ccc; padding:1rem;">
-  <h3>Chat Log</h3>
-  <div id="chat" style="height:150px; overflow:auto; background:#f9f9f9; padding:5px;"></div>
+  <h3>WebRTC Connection Stats</h3>
+  <div id="statsArea" style="white-space: pre; background:#f9f9f9; padding:5px; height:150px; overflow:auto;"></div>
 </div>
 
 <!-- Include PeerJS from a public CDN -->
@@ -33,33 +32,30 @@
 
 <script>
 /**
- * GOAL:
- * - If on a phone (host), create Peer with ID "hotspot-host".
- * - If on a laptop/tablet (client), create Peer with no ID (random)
- *   and automatically connect to "hotspot-host".
- * - Exchange messages with a WebRTC DataConnection (p2p).
- * - Host on a static site (e.g. GitHub Pages) with no custom server.
- * - Use the free PeerJS cloud at 0.peerjs.com to handle signaling.
+ * 1) Identify if we're the Phone (host) or the Client.
+ * 2) If Phone, create Peer("hotspot-host").
+ *    If Client, create Peer() with random ID and connect to "hotspot-host."
+ * 3) Client sends device info automatically to the phone.
+ * 4) Phone displays the device info + the WebRTC ICE candidate pair stats.
  */
 
+// Hard-coded ID for the phone
 const HOST_ID = "hotspot-host";
 const statusEl = document.getElementById("status");
-const chatEl = document.getElementById("chat");
-const msgInput = document.getElementById("msgInput");
-const sendBtn = document.getElementById("sendBtn");
+const deviceInfoEl = document.getElementById("deviceInfo");
+const statsEl = document.getElementById("statsArea");
 
 /** 
- * Simple heuristic: if userAgent includes "Mobile", assume it's the phone (host).
- * Not bulletproof, but enough for a demo.
+ * Simple heuristic: if userAgent includes "Mobile" or "Android/iOS",
+ * assume it's the phone (host). It's not bulletproof, but enough for a demo.
  */
 const isPhoneHost = /Mobile|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 /**
- * Create a PeerJS instance pointing to the free cloud server at 0.peerjs.com.
- * No key required for basic demos. 
+ * Create a PeerJS instance pointing to the free cloud at 0.peerjs.com.
  */
 let peer = new Peer(
-  isPhoneHost ? HOST_ID : undefined,  // If phone, fix an ID; if not, random
+  isPhoneHost ? HOST_ID : undefined,  // phone => "hotspot-host", client => random
   {
     host: "0.peerjs.com",
     secure: true,
@@ -75,45 +71,66 @@ let peer = new Peer(
 
 let dataConn = null;
 
-// When PeerJS is ready (we have an ID)
 peer.on("open", (id) => {
   console.log("My peer ID:", id);
   if (isPhoneHost) {
-    statusEl.innerHTML = 
-      "Phone is host with ID: <strong>" + id + "</strong><br>" +
-      "Waiting for client to connect...";
+    statusEl.innerHTML = "Phone is host with ID: <strong>" + id + "</strong><br>Waiting for client to connect...";
   } else {
-    statusEl.innerHTML = 
-      "Client device (random ID: <strong>" + id + "</strong>)<br>" +
-      "Connecting to host...";
-    // Auto-connect to phone host
+    statusEl.innerHTML = "Client ID: <strong>" + id + "</strong><br>Connecting to host...";
+    // Client automatically connects to the phone host
     dataConn = peer.connect(HOST_ID);
-    setupDataConnHandlers(dataConn);
+    setupConn(dataConn);
   }
 });
 
-/**
- * If we are the host, we wait for an incoming connection from the client.
+/** 
+ * If phone, wait for the client to connect. 
  */
 peer.on("connection", (conn) => {
-  console.log("Received connection from client:", conn.peer);
+  console.log("Host received incoming connection from", conn.peer);
   dataConn = conn;
-  setupDataConnHandlers(dataConn);
+  setupConn(dataConn);
   statusEl.innerHTML = "Connected! Host <-> Client";
 });
 
 /**
- * Common function to set up data connection callbacks
+ * 2) Setup data connection events.
  */
-function setupDataConnHandlers(conn) {
+function setupConn(conn) {
   conn.on("open", () => {
-    statusEl.innerHTML = "Connected! You can chat now.";
-    console.log("DataConnection open with peer:", conn.peer);
+    console.log("Data channel open with peer:", conn.peer);
+    if (isPhoneHost) {
+      statusEl.innerHTML = "Connected! Host <-> Client<br>Awaiting device info...";
+    } else {
+      statusEl.innerHTML = "Connected to host! Sending device info automatically...";
+      // Client automatically sends some info
+      const info = {
+        userAgent: navigator.userAgent,
+        timestamp: new Date().toString(),
+        note: "Hi from the hotspot client!"
+      };
+      conn.send(JSON.stringify(info));
+    }
+    // Periodically show stats (phone side only)
+    if (isPhoneHost) {
+      setInterval(() => showConnectionStats(conn), 3000);
+    }
   });
 
-  conn.on("data", (message) => {
-    console.log("Received:", message);
-    addChatMessage("Them", message);
+  conn.on("data", (data) => {
+    // If host receives client device info
+    if (isPhoneHost) {
+      try {
+        const parsed = JSON.parse(data);
+        deviceInfoEl.innerHTML = 
+          "<strong>Received from Client:</strong><br>" +
+          "User Agent: " + parsed.userAgent + "<br>" +
+          "Timestamp: " + parsed.timestamp + "<br>" +
+          "Note: " + parsed.note;
+      } catch (err) {
+        console.warn("Received non-JSON data:", data);
+      }
+    }
   });
 
   conn.on("close", () => {
@@ -122,28 +139,31 @@ function setupDataConnHandlers(conn) {
 }
 
 /**
- * Send button handler
+ * 3) Show WebRTC ICE candidate stats (phone side).
+ *    We do a small hack to grab the underlying RTCPeerConnection.
+ *    In PeerJS 1.x, it's at dataConn._pc or dataConn._peerConnection.
  */
-sendBtn.addEventListener("click", () => {
-  if (!dataConn || dataConn.open === false) {
-    alert("Not connected yet!");
+function showConnectionStats(conn) {
+  // Hack: get the PC from PeerJS internal property
+  let pc = conn._pc || conn._peerConnection;
+  if (!pc) {
+    statsEl.innerHTML = "No PeerConnection yet.";
     return;
   }
-  const msg = msgInput.value.trim();
-  if (!msg) return;
-  dataConn.send(msg);
-  addChatMessage("You", msg);
-  msgInput.value = "";
-});
 
-/**
- * Helper: Display a new chat message on screen
- */
-function addChatMessage(sender, msg) {
-  const div = document.createElement("div");
-  div.textContent = sender + ": " + msg;
-  chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
+  pc.getStats().then((reports) => {
+    let candidatePairInfo = "";
+    reports.forEach((report) => {
+      // Look for 'candidate-pair' reports in 'succeeded' or 'in-progress'
+      if (report.type === "candidate-pair" && (report.state === "succeeded" || report.state === "in-progress")) {
+        candidatePairInfo += JSON.stringify(report, null, 2) + "\n\n";
+      }
+    });
+    if (!candidatePairInfo) {
+      candidatePairInfo = "No active candidate pairs yet.";
+    }
+    statsEl.innerHTML = candidatePairInfo;
+  });
 }
 </script>
 </body>
