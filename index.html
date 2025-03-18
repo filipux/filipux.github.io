@@ -1,91 +1,144 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto P2P WebRTC</title>
+  <meta charset="utf-8" />
+  <title>Automatic WebRTC Demo (Phone Hotspot & Client)</title>
 </head>
 <body>
-    <h1>Auto P2P WebRTC</h1>
-    <h2>Device Info:</h2>
-    <pre id="device-info">Waiting for connection...</pre>
-    <h2>Messages:</h2>
-    <ul id="messages"></ul>
+<h2>Automatic P2P Demo</h2>
+<p>
+  This page uses the free PeerJS Cloud Server for signaling.<br>
+  <strong>Phone (host):</strong> Will create a PeerJS “hotspot-host” ID.<br>
+  <strong>Client device:</strong> Will create a random PeerJS ID and automatically connect to “hotspot-host.”
+</p>
 
-    <script>
-        let pc = new RTCPeerConnection();
-        let dataChannel;
-        let isHost = !localStorage.getItem("webrtc-host"); // First device is the host
-        let signalStorageKey = "webrtc-signal"; // Shared storage key
+<div style="border:1px solid #ccc; padding:1rem; margin:1rem 0;">
+  <h3>Connection Status</h3>
+  <div id="status">Loading...</div>
+</div>
 
-        function getDeviceInfo() {
-            return {
-                userAgent: navigator.userAgent,
-                platform: navigator.platform,
-                timestamp: new Date().toISOString()
-            };
-        }
+<div style="border:1px solid #ccc; padding:1rem; margin:1rem 0;">
+  <h3>Send a Message</h3>
+  <input type="text" id="msgInput" placeholder="Type something..." />
+  <button id="sendBtn">Send</button>
+</div>
 
-        function logMessage(msg) {
-            document.getElementById("messages").innerHTML += `<li>${msg}</li>`;
-        }
+<div style="border:1px solid #ccc; padding:1rem;">
+  <h3>Chat Log</h3>
+  <div id="chat" style="height:150px; overflow:auto; background:#f9f9f9; padding:5px;"></div>
+</div>
 
-        function sendMessage(msg) {
-            if (dataChannel && dataChannel.readyState === "open") {
-                dataChannel.send(msg);
-                logMessage("You: " + msg);
-            }
-        }
+<!-- Include PeerJS from a public CDN -->
+<script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
-        function setupDataChannel(channel) {
-            dataChannel = channel;
-            dataChannel.onopen = () => {
-                console.log("Connected!");
-                sendMessage(JSON.stringify({ type: "device-info", data: getDeviceInfo() }));
-            };
-            dataChannel.onmessage = (event) => {
-                let receivedData = JSON.parse(event.data);
-                if (receivedData.type === "device-info") {
-                    document.getElementById("device-info").textContent = JSON.stringify(receivedData.data, null, 2);
-                } else {
-                    logMessage("Peer: " + event.data);
-                }
-            };
-        }
+<script>
+/**
+ * GOAL:
+ * - If on a phone (host), create Peer with ID "hotspot-host".
+ * - If on a laptop/tablet (client), create Peer with no ID (random)
+ *   and automatically connect to "hotspot-host".
+ * - Exchange messages with a WebRTC DataConnection, no user input needed.
+ * - All you need is to host this file on a static site (e.g. GitHub Pages).
+ */
 
-        async function startConnection() {
-            if (isHost) {
-                dataChannel = pc.createDataChannel("device-info");
-                setupDataChannel(dataChannel);
-                let offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                localStorage.setItem(signalStorageKey, JSON.stringify({ offer }));
-                localStorage.setItem("webrtc-host", "true"); // Mark this device as the host
-            } else {
-                pc.ondatachannel = (event) => setupDataChannel(event.channel);
-            }
-        }
+const HOST_ID = "hotspot-host";
+const statusEl = document.getElementById("status");
+const chatEl = document.getElementById("chat");
+const msgInput = document.getElementById("msgInput");
+const sendBtn = document.getElementById("sendBtn");
 
-        async function checkForSignal() {
-            let storedData = JSON.parse(localStorage.getItem(signalStorageKey));
-            if (!storedData) return;
+/** 
+ * Simple heuristic: if userAgent includes "Mobile", assume it's the phone (host).
+ * This is not perfect, but it demonstrates the idea.
+ */
+const isPhoneHost = /Mobile|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-            if (storedData.offer && !isHost) {
-                await pc.setRemoteDescription(new RTCSessionDescription(storedData.offer));
-                let answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                localStorage.setItem(signalStorageKey, JSON.stringify({ answer }));
-            } else if (storedData.answer && isHost) {
-                await pc.setRemoteDescription(new RTCSessionDescription(storedData.answer));
-                localStorage.removeItem(signalStorageKey); // Clean up after connection
-            }
-        }
+/**
+ * Create a PeerJS instance pointing to the free PeerJS Cloud Server.
+ * (No API key needed since they allow keyless usage at time of writing.)
+ */
+let peer = new Peer(
+  isPhoneHost ? HOST_ID : undefined,  // phone = "hotspot-host", client = random ID
+  {
+    host: "peerjs.com",
+    secure: true,
+    port: 443,
+    config: {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" }
+      ]
+    }
+  }
+);
 
-        // Poll for WebRTC signals
-        setInterval(checkForSignal, 1000);
+let dataConn = null;
 
-        // Start WebRTC
-        startConnection();
-    </script>
+// When PeerJS is ready (we have an ID)
+peer.on("open", (id) => {
+  console.log("My peer ID:", id);
+  if (isPhoneHost) {
+    statusEl.innerHTML = "Phone is host with ID: " + id + "<br>Waiting for client to connect...";
+  } else {
+    statusEl.innerHTML = "Client device (random ID: " + id + ")<br>Connecting to host...";
+    // Auto-connect to phone host
+    dataConn = peer.connect(HOST_ID);
+    setupDataConnHandlers(dataConn);
+  }
+});
+
+/**
+ * If we are the host, we wait for an incoming connection from the client.
+ */
+peer.on("connection", (conn) => {
+  console.log("Received connection from client:", conn.peer);
+  dataConn = conn;
+  setupDataConnHandlers(dataConn);
+  statusEl.innerHTML = "Connected! Host <-> Client";
+});
+
+/**
+ * Common function to set up data connection callbacks
+ */
+function setupDataConnHandlers(conn) {
+  conn.on("open", () => {
+    statusEl.innerHTML = "Connected! You can chat now.";
+    console.log("DataConnection open with peer:", conn.peer);
+  });
+
+  conn.on("data", (message) => {
+    console.log("Received:", message);
+    addChatMessage("Them", message);
+  });
+
+  conn.on("close", () => {
+    statusEl.innerHTML = "Connection closed.";
+  });
+}
+
+/**
+ * Send button handler
+ */
+sendBtn.addEventListener("click", () => {
+  if (!dataConn || dataConn.open === false) {
+    alert("Not connected yet!");
+    return;
+  }
+  const msg = msgInput.value.trim();
+  if (!msg) return;
+  dataConn.send(msg);
+  addChatMessage("You", msg);
+  msgInput.value = "";
+});
+
+/**
+ * Helper: Display a new chat message on screen
+ */
+function addChatMessage(sender, msg) {
+  const div = document.createElement("div");
+  div.textContent = sender + ": " + msg;
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+</script>
 </body>
 </html>
