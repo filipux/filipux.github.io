@@ -3,20 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto P2P Device Info Exchange</title>
+    <title>Auto P2P WebRTC</title>
 </head>
 <body>
     <h1>Auto P2P WebRTC</h1>
     <h2>Device Info:</h2>
-    <pre id="device-info"></pre>
+    <pre id="device-info">Waiting for connection...</pre>
     <h2>Messages:</h2>
     <ul id="messages"></ul>
 
     <script>
         let pc = new RTCPeerConnection();
         let dataChannel;
-        let isHost = Math.random() > 0.5; // Randomly pick a host and a client
-        let signalStorageKey = "webrtc-signal"; // Shared key for signaling
+        let isHost = !localStorage.getItem("webrtc-host"); // First device is the host
+        let signalStorageKey = "webrtc-signal"; // Shared storage key
 
         function getDeviceInfo() {
             return {
@@ -60,6 +60,7 @@
                 let offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
                 localStorage.setItem(signalStorageKey, JSON.stringify({ offer }));
+                localStorage.setItem("webrtc-host", "true"); // Mark this device as the host
             } else {
                 pc.ondatachannel = (event) => setupDataChannel(event.channel);
             }
@@ -68,6 +69,7 @@
         async function checkForSignal() {
             let storedData = JSON.parse(localStorage.getItem(signalStorageKey));
             if (!storedData) return;
+
             if (storedData.offer && !isHost) {
                 await pc.setRemoteDescription(new RTCSessionDescription(storedData.offer));
                 let answer = await pc.createAnswer();
@@ -75,13 +77,14 @@
                 localStorage.setItem(signalStorageKey, JSON.stringify({ answer }));
             } else if (storedData.answer && isHost) {
                 await pc.setRemoteDescription(new RTCSessionDescription(storedData.answer));
+                localStorage.removeItem(signalStorageKey); // Clean up after connection
             }
         }
 
-        // Periodically check for updates in localStorage (simulating a signaling server)
+        // Poll for WebRTC signals
         setInterval(checkForSignal, 1000);
 
-        // Start WebRTC automatically
+        // Start WebRTC
         startConnection();
     </script>
 </body>
