@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local IP Detector</title>
+</head>
+<body>
+    <h1>Local IP Detector</h1>
+    <p>Your detected IPs:</p>
+    <ul id="ip-list"></ul>
+
+    <script>
+        async function getLocalIPs() {
+            return new Promise((resolve) => {
+                let ips = [];
+                const pc = new RTCPeerConnection({ iceServers: [] });
+
+                pc.createDataChannel("");
+                pc.createOffer().then(offer => pc.setLocalDescription(offer));
+
+                pc.onicecandidate = (event) => {
+                    if (!event.candidate) {
+                        pc.close();
+                        return resolve(ips);
+                    }
+                    const parts = event.candidate.candidate.split(" ");
+                    const candidateIP = parts[4];
+                    if (!ips.includes(candidateIP)) {
+                        ips.push(candidateIP);
+                        document.getElementById("ip-list").innerHTML += `<li>${candidateIP}</li>`;
+                    }
+                };
+            });
+        }
+
+        // Run the detection
+        getLocalIPs();
+    </script>
+</body>
+</html>
